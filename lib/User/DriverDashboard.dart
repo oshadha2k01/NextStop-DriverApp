@@ -68,7 +68,7 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
   }
 
   Future<void> _connectToPassengerFeed() async {
-    final busId = _readValue(widget.bus, ['id', '_id', 'busId']);
+    final busId = _readValue(widget.bus, ['_id', 'id', 'busId']);
     final token = await AuthService().getToken();
 
     _statusSubscription = _socketService.status.listen((status) {
@@ -347,7 +347,7 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
     final busRegNo = _readValue(widget.bus, ['regNo', 'registrationNumber', 'busNo']);
     final busRoute = _readValue(widget.bus, ['route', 'routeName', 'routeNo']);
     final busType = _readValue(widget.bus, ['type', 'busType']);
-    final busId = _readValue(widget.bus, ['id', '_id', 'busId']);
+    final busId = _readValue(widget.bus, ['_id', 'id', 'busId']);
 
     final latestNotification = _notifications.isNotEmpty ? _notifications.first : null;
 

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:flutter/foundation.dart';
 import 'package:socket_io_client/socket_io_client.dart' as io;
 import '../config/api_config.dart';
 
@@ -23,12 +24,16 @@ class DriverSocketService {
     _socket = io.io(
       ApiConfig.socketUrl,
       io.OptionBuilder()
+          .disableAutoConnect()
+          .setPath(ApiConfig.socketPath)
           .setTransports(['websocket', 'polling'])
           .enableReconnection()
           .setReconnectionAttempts(20)
           .setReconnectionDelay(2000)
-          .setPath(ApiConfig.socketPath)
           .setAuth({'token': token ?? ''})
+          .setExtraHeaders({
+            if (token != null && token.isNotEmpty) 'Authorization': 'Bearer $token',
+          })
           .build(),
     );
 
@@ -39,6 +44,7 @@ class DriverSocketService {
 
     _socket!.on('driver_joined', (data) {
       _statusController.add('joined');
+      debugPrint('driver_joined: $data');
     });
 
     _socket!.on('passenger_boarding', (payload) {
@@ -59,6 +65,12 @@ class DriverSocketService {
 
     _socket!.onConnectError((error) {
       _statusController.add('error');
+      debugPrint('Driver socket connect error: $error');
+    });
+
+    _socket!.onError((error) {
+      _statusController.add('error');
+      debugPrint('Driver socket error: $error');
     });
 
     _socket!.connect();

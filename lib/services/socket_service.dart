@@ -22,6 +22,7 @@ class SocketService {
       ApiConfig.socketUrl,
       IO.OptionBuilder()
           .setTransports(['websocket'])
+          .setPath(ApiConfig.socketPath)
           .disableAutoConnect()
           .setAuth({'token': token ?? ''})
           .build(),

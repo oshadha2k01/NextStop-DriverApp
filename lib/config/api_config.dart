@@ -1,6 +1,6 @@
 class ApiConfig {
   static const String baseUrl = 'https://smartbusstop.me/backend/api';
-  static const String socketUrl = 'https://smartbusstop.me/backend';
+  static const String socketUrl = 'https://smartbusstop.me';
   static const String socketPath = '/backend/socket.io';
   static const Duration requestTimeout = Duration(seconds: 15);
 
