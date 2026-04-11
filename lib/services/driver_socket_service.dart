@@ -26,7 +26,7 @@ class DriverSocketService {
       io.OptionBuilder()
           .disableAutoConnect()
           .setPath(ApiConfig.socketPath)
-          .setTransports(['websocket', 'polling'])
+          .setTransports(['websocket'])
           .enableReconnection()
           .setReconnectionAttempts(20)
           .setReconnectionDelay(2000)
