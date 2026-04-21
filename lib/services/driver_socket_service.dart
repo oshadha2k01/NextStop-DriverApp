@@ -48,9 +48,15 @@ class DriverSocketService {
     });
 
     _socket!.on('passenger_boarding', (payload) {
+      debugPrint('passenger_boarding raw: $payload');
       final notification = _asMap(payload);
       if (notification != null) {
         _notificationController.add(notification);
+      } else if (payload != null) {
+        _notificationController.add({
+          'message': payload.toString(),
+          'rawPayload': payload,
+        });
       }
     });
 

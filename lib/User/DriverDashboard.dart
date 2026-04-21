@@ -1,6 +1,8 @@
 import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
+
 import '../services/alert_service.dart';
 import '../services/auth_service.dart';
 import '../services/driver_socket_service.dart';
@@ -21,8 +23,7 @@ class DriverDashboardScreen extends StatefulWidget {
 
 class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
   static const Color primaryColor = Color(0xFFFF6B35);
-  static const Color backgroundColor = Colors.white;
-  static const Color cardColor = Colors.white;
+  static const Color backgroundColor = Color(0xFFFFFAF7);
   static const Color textPrimary = Color(0xFF1F2937);
   static const Color textSecondary = Color(0xFF6B7280);
   static const LatLng _defaultCenter = LatLng(6.9271, 79.8612);
@@ -30,18 +31,21 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
   final DriverSocketService _socketService = DriverSocketService();
   final AlertService _alertService = AlertService();
   final List<Map<String, dynamic>> _notifications = [];
-  final Completer<GoogleMapController> _mapController = Completer<GoogleMapController>();
+  final Completer<GoogleMapController> _mapController =
+      Completer<GoogleMapController>();
 
   StreamSubscription<Map<String, dynamic>>? _notificationSubscription;
   StreamSubscription<String>? _statusSubscription;
 
   bool _isConnecting = true;
+  bool _soundEnabled = true;
   String _connectionStatus = 'Connecting to live updates...';
   int _unreadCount = 0;
 
   LatLng _busLocation = _defaultCenter;
   LatLng? _passengerLocation;
   Map<String, dynamic>? _activeNotification;
+
   Set<Marker> _markers = {
     const Marker(
       markerId: MarkerId('default_bus'),
@@ -49,6 +53,7 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
       infoWindow: InfoWindow(title: 'Bus location'),
     ),
   };
+
   Set<Polyline> _polylines = {};
 
   @override
@@ -97,7 +102,8 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
       });
     });
 
-    _notificationSubscription = _socketService.notifications.listen((payload) async {
+    _notificationSubscription =
+        _socketService.notifications.listen((payload) async {
       if (!mounted) return;
 
       setState(() {
@@ -107,7 +113,10 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
         _applyLivePayload(payload);
       });
 
-      await _alertService.playPassengerAlert();
+      if (_soundEnabled) {
+        await _alertService.playPassengerAlert();
+      }
+
       _focusMapOnLiveEvent();
     });
 
@@ -120,15 +129,36 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
       return;
     }
 
-    _socketService.connect(
-      busId: busId,
-      token: token,
-    );
+    _socketService.connect(busId: busId, token: token);
+  }
+
+  Future<void> _manualReconnect(String busId) async {
+    final token = await AuthService().getToken();
+    if (!mounted) return;
+
+    setState(() {
+      _isConnecting = true;
+      _connectionStatus = 'Connecting to live updates...';
+    });
+
+    _socketService.connect(busId: busId, token: token);
+  }
+
+  void _manualDisconnect() {
+    _socketService.disconnect();
+    if (!mounted) return;
+
+    setState(() {
+      _isConnecting = false;
+      _connectionStatus = 'Disconnected from live updates';
+    });
   }
 
   void _primeMapFromBus() {
-    final lat = _readDouble(widget.bus, ['lat', 'latitude', 'busLat', 'currentLat']);
-    final lng = _readDouble(widget.bus, ['lng', 'longitude', 'busLng', 'currentLng']);
+    final lat =
+        _readDouble(widget.bus, ['lat', 'latitude', 'busLat', 'currentLat']);
+    final lng =
+        _readDouble(widget.bus, ['lng', 'longitude', 'busLng', 'currentLng']);
 
     if (lat != null && lng != null) {
       _busLocation = LatLng(lat, lng);
@@ -203,15 +233,11 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
 
     _mapController.future.then((controller) {
       final passenger = _passengerLocation!;
-
       if (_busLocation.latitude == passenger.latitude &&
           _busLocation.longitude == passenger.longitude) {
-        controller.animateCamera(
-          CameraUpdate.newLatLngZoom(_busLocation, 15),
-        );
+        controller.animateCamera(CameraUpdate.newLatLngZoom(_busLocation, 15));
         return;
       }
-
       controller.animateCamera(
         CameraUpdate.newLatLngBounds(_boundsFor(_busLocation, passenger), 70),
       );
@@ -246,9 +272,7 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
     for (final key in keys) {
       final value = source[key];
       if (value is num) return value.toDouble();
-      if (value is String) {
-        return double.tryParse(value);
-      }
+      if (value is String) return double.tryParse(value);
     }
     return null;
   }
@@ -260,21 +284,14 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
   }
 
   String _formatNotificationTitle(Map<String, dynamic> payload, int index) {
-    return _readValue(payload, [
+    final value = _readValue(payload, [
       'title',
       'passengerName',
       'name',
       'userName',
       'messageType',
-    ]) == 'N/A'
-        ? 'Passenger Boarding #${index + 1}'
-        : _readValue(payload, [
-            'title',
-            'passengerName',
-            'name',
-            'userName',
-            'messageType',
-          ]);
+    ]);
+    return value == 'N/A' ? 'Passenger Boarding #${index + 1}' : value;
   }
 
   String _formatNotificationBody(Map<String, dynamic> payload) {
@@ -302,247 +319,240 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
     return parts.isEmpty ? 'Passenger boarding update received' : parts.join(' • ');
   }
 
-  IconData _notificationIcon(int index, Map<String, dynamic> payload) {
-    final message = _formatNotificationBody(payload).toLowerCase();
-    if (message.contains('distance')) return Icons.route_rounded;
-    if (message.contains('stop')) return Icons.place_rounded;
-    if (message.contains('board')) return Icons.directions_walk_rounded;
-    if (message.contains('bus')) return Icons.directions_bus_rounded;
-
-    const icons = <IconData>[
-      Icons.notifications_active_rounded,
-      Icons.directions_walk_rounded,
-      Icons.directions_bus_rounded,
-      Icons.place_rounded,
-      Icons.route_rounded,
-    ];
-    return icons[index % icons.length];
-  }
-
-  Color _notificationTint(int index) {
-    const colors = <Color>[
-      Color(0xFFFFF0E8),
-      Color(0xFFEAF7FF),
-      Color(0xFFEFFAF2),
-      Color(0xFFFFF8E8),
-      Color(0xFFF3EEFF),
-    ];
-    return colors[index % colors.length];
-  }
-
   void _markAllRead() {
     setState(() {
       _unreadCount = 0;
     });
   }
 
+  void _dismissActiveNotification() {
+    setState(() {
+      _activeNotification = null;
+      _unreadCount = 0;
+    });
+  }
+
+  Future<void> _testSound() async {
+    await _alertService.playPassengerAlert();
+  }
+
   @override
   Widget build(BuildContext context) {
     final driverName = _readValue(widget.driver, ['name', 'fullName', 'driverName']);
-    final driverPhone = _readValue(widget.driver, ['phone', 'phoneNumber', 'mobile']);
-    final driverLicense = _readValue(widget.driver, ['licenseNumber', 'licenceNumber', 'licenseNo']);
-    final driverShift = _readValue(widget.driver, ['shift', 'shiftName']);
-    final driverStatus = _readValue(widget.driver, ['status', 'driverStatus']);
-
     final busRegNo = _readValue(widget.bus, ['regNo', 'registrationNumber', 'busNo']);
     final busRoute = _readValue(widget.bus, ['route', 'routeName', 'routeNo']);
-    final busType = _readValue(widget.bus, ['type', 'busType']);
     final busId = _readValue(widget.bus, ['_id', 'id', 'busId']);
 
-    final latestNotification = _notifications.isNotEmpty ? _notifications.first : null;
+    final isDesktop = MediaQuery.of(context).size.width >= 980;
+    final isConnected = _connectionStatus.toLowerCase().contains('active') ||
+        _connectionStatus.toLowerCase().contains('connected') ||
+        _connectionStatus.toLowerCase().contains('joined');
 
     return Scaffold(
       backgroundColor: backgroundColor,
-      appBar: AppBar(
-        title: const Text('Driver Dashboard'),
-        backgroundColor: primaryColor,
-        foregroundColor: Colors.white,
-        elevation: 0,
-        actions: [
-          Stack(
-            alignment: Alignment.center,
-            children: [
-              IconButton(
-                onPressed: _notifications.isEmpty ? null : _markAllRead,
-                icon: const Icon(Icons.notifications_none_rounded),
-              ),
-              if (_unreadCount > 0)
-                Positioned(
-                  right: 10,
-                  top: 10,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                    decoration: const BoxDecoration(
-                      color: Colors.white,
-                      shape: BoxShape.circle,
-                    ),
-                    child: Text(
-                      _unreadCount > 9 ? '9+' : '$_unreadCount',
-                      style: const TextStyle(
-                        color: primaryColor,
-                        fontSize: 10,
-                        fontWeight: FontWeight.bold,
+      body: SafeArea(
+        child: Column(
+          children: [
+            _topBar(driverName, isConnected),
+            _setupPanel(busRegNo, busRoute, busId),
+            Expanded(
+              child: isDesktop
+                  ? Row(
+                      children: [
+                        Expanded(
+                          child: Padding(
+                            padding: const EdgeInsets.fromLTRB(16, 0, 12, 16),
+                            child: _mapDashboardCard(busRegNo, busRoute),
+                          ),
+                        ),
+                        SizedBox(
+                          width: 360,
+                          child: Padding(
+                            padding: const EdgeInsets.fromLTRB(12, 0, 16, 16),
+                            child: _sidebarPanel(),
+                          ),
+                        ),
+                      ],
+                    )
+                  : Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                      child: Column(
+                        children: [
+                          Expanded(flex: 5, child: _mapDashboardCard(busRegNo, busRoute)),
+                          const SizedBox(height: 12),
+                          Expanded(flex: 6, child: _sidebarPanel()),
+                        ],
                       ),
+                    ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _topBar(String driverName, bool isConnected) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(20, 14, 20, 14),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          colors: [Color(0xFFFF6B35), Color(0xFFFF8A5B)],
+          begin: Alignment.centerLeft,
+          end: Alignment.centerRight,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.08),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'NextStop',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 23,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 0.4,
+                ),
+              ),
+              Text(
+                'Driver Dashboard • $driverName',
+                style: TextStyle(
+                  color: Colors.white.withValues(alpha: 0.9),
+                  fontSize: 12,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ],
+          ),
+          Row(
+            children: [
+              if (_unreadCount > 0)
+                Container(
+                  margin: const EdgeInsets.only(right: 10),
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(99),
+                  ),
+                  child: Text(
+                    _unreadCount > 99 ? '99+' : '$_unreadCount',
+                    style: const TextStyle(
+                      color: primaryColor,
+                      fontWeight: FontWeight.w800,
+                      fontSize: 12,
                     ),
                   ),
                 ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(99),
+                  border: Border.all(
+                    color: isConnected
+                        ? const Color(0xFF30B857)
+                        : const Color(0xFFFFA37A),
+                  ),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      Icons.circle,
+                      size: 9,
+                      color: isConnected ? const Color(0xFF30B857) : primaryColor,
+                    ),
+                    const SizedBox(width: 7),
+                    Text(
+                      isConnected ? 'Connected' : 'Disconnected',
+                      style: TextStyle(
+                        color:
+                            isConnected ? const Color(0xFF1F7A3D) : primaryColor,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             ],
           ),
         ],
       ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+    );
+  }
+
+  Widget _setupPanel(String busRegNo, String busRoute, String busId) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: const Color(0xFFFFF4EE),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: const Color(0xFFFFD4C1)),
+        ),
+        child: Wrap(
+          spacing: 10,
+          runSpacing: 10,
+          crossAxisAlignment: WrapCrossAlignment.center,
           children: [
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(20),
-              decoration: BoxDecoration(
-                gradient: const LinearGradient(
-                  colors: [Color(0xFFFF6B35), Color(0xFFFF8A5B)],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                ),
-                borderRadius: BorderRadius.circular(20),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.12),
-                    blurRadius: 12,
-                    offset: const Offset(0, 6),
-                  ),
-                ],
+            _chipField(Icons.directions_bus_filled_rounded, 'Bus', busRegNo),
+            _chipField(Icons.route_rounded, 'Route', busRoute),
+            _chipField(Icons.badge_rounded, 'Bus ID', busId),
+            FilledButton.icon(
+              style: FilledButton.styleFrom(
+                backgroundColor: primaryColor,
+                foregroundColor: Colors.white,
               ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'Assigned Bus',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 14,
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    busRegNo,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 24,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    'Route: $busRoute',
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 15,
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  Text(
-                    driverName,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 16,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    _isConnecting ? _connectionStatus : 'Bus ID: $busId',
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 13,
-                    ),
-                  ),
-                ],
-              ),
+              onPressed: busId == 'N/A' ? null : () => _manualReconnect(busId),
+              icon: const Icon(Icons.link_rounded),
+              label: const Text('Connect'),
             ),
-            const SizedBox(height: 20),
-            _statusPill(_connectionStatus),
-            const SizedBox(height: 18),
-            const Text(
-              'Live Map',
-              style: TextStyle(
-                fontSize: 20,
-                fontWeight: FontWeight.bold,
-                color: textPrimary,
-              ),
+            OutlinedButton.icon(
+              onPressed: _manualDisconnect,
+              icon: const Icon(Icons.link_off_rounded),
+              label: const Text('Disconnect'),
             ),
-            const SizedBox(height: 12),
-            _mapDashboardCard(busRegNo, busRoute),
-            const SizedBox(height: 18),
-            const Text(
-              'Driver Profile',
-              style: TextStyle(
-                fontSize: 20,
-                fontWeight: FontWeight.bold,
-                color: textPrimary,
-              ),
-            ),
-            const SizedBox(height: 12),
-            _infoCard('Name', driverName),
-            _infoCard('Phone', driverPhone),
-            _infoCard('License Number', driverLicense),
-            _infoCard('Shift', driverShift),
-            _infoCard('Status', driverStatus),
-            const SizedBox(height: 14),
-            const Text(
-              'Bus Details',
-              style: TextStyle(
-                fontSize: 20,
-                fontWeight: FontWeight.bold,
-                color: textPrimary,
-              ),
-            ),
-            const SizedBox(height: 12),
-            _infoCard('Bus Number Plate', busRegNo),
-            _infoCard('Route', busRoute),
-            _infoCard('Bus Type', busType),
-            const SizedBox(height: 14),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                const Text(
-                  'Passenger Boarding Messages',
-                  style: TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold,
-                    color: textPrimary,
-                  ),
-                ),
-                TextButton(
-                  onPressed: _notifications.isEmpty
-                      ? null
-                      : () {
-                          setState(() => _notifications.clear());
-                        },
-                  child: const Text('Clear'),
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            if (latestNotification != null) ...[
-              _latestNotificationCard(latestNotification),
-              const SizedBox(height: 14),
-            ],
-            if (_notifications.isEmpty)
-              _emptyStateCard()
-            else
-              ListView.separated(
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                itemCount: _notifications.length,
-                separatorBuilder: (context, index) => const SizedBox(height: 10),
-                itemBuilder: (context, index) {
-                  final notification = _notifications[index];
-                  return _notificationTile(notification, index);
-                },
-              ),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _chipField(IconData icon, String label, String value) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: const Color(0xFFFFDCCB)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 16, color: primaryColor),
+          const SizedBox(width: 6),
+          Text(
+            '$label: $value',
+            style: const TextStyle(
+              color: textPrimary,
+              fontWeight: FontWeight.w600,
+              fontSize: 12.5,
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -550,20 +560,20 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
   Widget _mapDashboardCard(String busRegNo, String busRoute) {
     return Container(
       width: double.infinity,
-      height: 280,
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(20),
-        color: Colors.grey.shade200,
+        borderRadius: BorderRadius.circular(18),
+        color: const Color(0xFFFFF4EE),
+        border: Border.all(color: const Color(0xFFFFD9C8)),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.08),
-            blurRadius: 16,
-            offset: const Offset(0, 6),
+            color: Colors.black.withValues(alpha: 0.05),
+            blurRadius: 14,
+            offset: const Offset(0, 8),
           ),
         ],
       ),
       child: ClipRRect(
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: BorderRadius.circular(18),
         child: Stack(
           children: [
             GoogleMap(
@@ -589,10 +599,11 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
               right: 12,
               top: 12,
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
                 decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.95),
-                  borderRadius: BorderRadius.circular(14),
+                  color: Colors.white.withValues(alpha: 0.94),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: const Color(0xFFFFE2D4)),
                 ),
                 child: Row(
                   children: [
@@ -603,13 +614,14 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
                         '$busRegNo • $busRoute',
                         style: const TextStyle(
                           color: textPrimary,
-                          fontWeight: FontWeight.w600,
+                          fontWeight: FontWeight.w700,
                         ),
                         overflow: TextOverflow.ellipsis,
                       ),
                     ),
                     if (_passengerLocation != null)
-                      const Icon(Icons.person_pin_circle_rounded, color: Colors.blue),
+                      const Icon(Icons.person_pin_circle_rounded,
+                          color: Color(0xFF0EA5E9)),
                   ],
                 ),
               ),
@@ -620,16 +632,18 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
                 right: 12,
                 bottom: 12,
                 child: Container(
-                  padding: const EdgeInsets.all(12),
+                  padding: const EdgeInsets.all(11),
                   decoration: BoxDecoration(
                     color: Colors.white.withValues(alpha: 0.95),
-                    borderRadius: BorderRadius.circular(14),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: const Color(0xFFFFE2D4)),
                   ),
                   child: Text(
                     _formatNotificationMeta(_activeNotification!),
                     style: const TextStyle(
                       color: textSecondary,
                       fontSize: 12.5,
+                      fontWeight: FontWeight.w600,
                     ),
                   ),
                 ),
@@ -640,91 +654,84 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
     );
   }
 
-  Widget _statusPill(String status) {
-    final isActive = status.toLowerCase().contains('active') ||
-        status.toLowerCase().contains('connected') ||
-        status.toLowerCase().contains('joined');
-
+  Widget _sidebarPanel() {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       decoration: BoxDecoration(
-        color: isActive ? const Color(0xFFE8FFF1) : const Color(0xFFFFF3E8),
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(
-          color: isActive ? const Color(0xFF22C55E) : primaryColor,
-        ),
-      ),
-      child: Text(
-        status,
-        style: TextStyle(
-          color: isActive ? const Color(0xFF166534) : primaryColor,
-          fontWeight: FontWeight.w600,
-        ),
-      ),
-    );
-  }
-
-  Widget _emptyStateCard() {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        color: cardColor,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.grey.shade200),
-      ),
-      child: const Text(
-        'Waiting for passenger boarding notifications. When a passenger boards, the message, distance, stops away, and alert will appear here.',
-        style: TextStyle(
-          color: textSecondary,
-          height: 1.4,
-        ),
-      ),
-    );
-  }
-
-  Widget _latestNotificationCard(Map<String, dynamic> notification) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        color: const Color(0xFFFFF7F1),
+        color: Colors.white,
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: primaryColor.withValues(alpha: 0.25)),
+        border: Border.all(color: const Color(0xFFFFDCCB)),
       ),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              const Icon(Icons.notifications_active_rounded, color: primaryColor),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Text(
-                  _formatNotificationTitle(notification, 0),
-                  style: const TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold,
-                    color: textPrimary,
-                  ),
+          if (_activeNotification != null)
+            _activeNotificationCard(_activeNotification!)
+          else
+            Container(
+              width: double.infinity,
+              margin: const EdgeInsets.all(12),
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: const Color(0xFFFFF8F4),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: const Color(0xFFFFE2D4)),
+              ),
+              child: const Text(
+                'Waiting for passenger boarding notifications...',
+                style: TextStyle(
+                  color: textSecondary,
+                  fontWeight: FontWeight.w500,
                 ),
               ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          Text(
-            _formatNotificationBody(notification),
-            style: const TextStyle(
-              color: textPrimary,
-              height: 1.4,
+            ),
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+              child: _notifications.isEmpty
+                  ? const Center(
+                      child: Text(
+                        'No notification history yet.',
+                        style: TextStyle(color: textSecondary, fontSize: 13),
+                      ),
+                    )
+                  : ListView.separated(
+                      itemCount: _notifications.length,
+                      separatorBuilder: (_, __) => const SizedBox(height: 8),
+                      itemBuilder: (context, index) {
+                        final notification = _notifications[index];
+                        return _historyTile(notification, index);
+                      },
+                    ),
             ),
           ),
-          const SizedBox(height: 10),
-          Text(
-            _formatNotificationMeta(notification),
-            style: const TextStyle(
-              color: textSecondary,
-              fontSize: 13,
+          Container(
+            padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
+            decoration: const BoxDecoration(
+              border: Border(top: BorderSide(color: Color(0xFFFFE2D4))),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.volume_up_rounded,
+                    size: 18, color: textSecondary),
+                const SizedBox(width: 8),
+                const Text(
+                  'Alert Sound',
+                  style: TextStyle(color: textSecondary, fontWeight: FontWeight.w600),
+                ),
+                const Spacer(),
+                Switch(
+                  value: _soundEnabled,
+                  activeColor: primaryColor,
+                  onChanged: (value) {
+                    setState(() {
+                      _soundEnabled = value;
+                    });
+                  },
+                ),
+                TextButton(
+                  onPressed: _testSound,
+                  child: const Text('Test'),
+                ),
+              ],
             ),
           ),
         ],
@@ -732,22 +739,186 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
     );
   }
 
-  Widget _notificationTile(Map<String, dynamic> notification, int index) {
-    final title = _formatNotificationTitle(notification, index);
-    final body = _formatNotificationBody(notification);
-    final meta = _formatNotificationMeta(notification);
-    final icon = _notificationIcon(index, notification);
-    final tint = _notificationTint(index);
+  Widget _activeNotificationCard(Map<String, dynamic> notification) {
+    final passengerLat = _readDouble(notification, ['passengerLat', 'latitude']) ??
+        _readDouble(_asMap(notification['passenger']), ['lat', 'latitude']);
+    final passengerLng = _readDouble(notification, ['passengerLng', 'longitude']) ??
+        _readDouble(_asMap(notification['passenger']), ['lng', 'longitude']);
+    final busLat = _readDouble(notification, ['busLat', 'busLatitude']) ??
+        _readDouble(_asMap(notification['bus']), ['lat', 'latitude']);
+    final busLng = _readDouble(notification, ['busLng', 'busLongitude']) ??
+        _readDouble(_asMap(notification['bus']), ['lng', 'longitude']);
 
     return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(16),
+      margin: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: cardColor,
+        color: const Color(0xFFFFFAF7),
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(
-          color: index == 0 ? primaryColor.withValues(alpha: 0.22) : Colors.grey.shade200,
-        ),
+        border: Border.all(color: const Color(0xFFFFC8AF), width: 1.8),
+      ),
+      child: Column(
+        children: [
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: const BoxDecoration(
+              color: Color(0xFFFFEFE6),
+              borderRadius: BorderRadius.vertical(top: Radius.circular(12)),
+            ),
+            child: Row(
+              children: [
+                const Expanded(
+                  child: Text(
+                    'Passenger Boarding Request',
+                    style: TextStyle(
+                      color: primaryColor,
+                      fontWeight: FontWeight.w800,
+                      fontSize: 13.5,
+                    ),
+                  ),
+                ),
+                if (_unreadCount > 0)
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: primaryColor,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: const Text(
+                      'NEW',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 10,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.all(12),
+            child: Column(
+              children: [
+                _detailLine(
+                  Icons.message_rounded,
+                  'Passenger Message',
+                  _formatNotificationBody(notification),
+                  highlight: true,
+                ),
+                _detailLine(
+                  Icons.route_rounded,
+                  'Road Distance',
+                  _readValue(notification, ['distanceText', 'distance', 'distanceKm']),
+                  highlight: true,
+                ),
+                _detailLine(
+                  Icons.schedule_rounded,
+                  'Estimated Arrival',
+                  _readValue(
+                    notification,
+                    ['durationText', 'duration', 'eta', 'minutes'],
+                  ),
+                  highlight: true,
+                ),
+                _detailLine(
+                  Icons.pin_drop_rounded,
+                  'Passenger Location',
+                  passengerLat != null && passengerLng != null
+                      ? '${passengerLat.toStringAsFixed(5)}, ${passengerLng.toStringAsFixed(5)}'
+                      : 'N/A',
+                ),
+                _detailLine(
+                  Icons.directions_bus_filled_rounded,
+                  'Bus Location',
+                  busLat != null && busLng != null
+                      ? '${busLat.toStringAsFixed(5)}, ${busLng.toStringAsFixed(5)}'
+                      : 'N/A',
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Expanded(
+                      child: FilledButton(
+                        style: FilledButton.styleFrom(
+                          backgroundColor: primaryColor,
+                          foregroundColor: Colors.white,
+                        ),
+                        onPressed: _markAllRead,
+                        child: const Text('Acknowledge'),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    OutlinedButton(
+                      onPressed: _dismissActiveNotification,
+                      child: const Text('Dismiss'),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _detailLine(
+    IconData icon,
+    String label,
+    String value, {
+    bool highlight = false,
+  }) {
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: const Color(0xFFFFE5D9)),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, color: primaryColor, size: 18),
+          const SizedBox(width: 9),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  label,
+                  style: const TextStyle(
+                    color: textSecondary,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  value == 'N/A' ? '—' : value,
+                  style: TextStyle(
+                    color: highlight ? primaryColor : textPrimary,
+                    fontWeight: FontWeight.w700,
+                    fontSize: highlight ? 14.5 : 13.5,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _historyTile(Map<String, dynamic> notification, int index) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFFFBF9),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFFFFE1D3)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -755,81 +926,46 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
           Row(
             children: [
               Container(
-                width: 42,
-                height: 42,
+                width: 30,
+                height: 30,
                 decoration: BoxDecoration(
-                  color: tint,
-                  borderRadius: BorderRadius.circular(12),
+                  color: const Color(0xFFFFEFE5),
+                  borderRadius: BorderRadius.circular(8),
                 ),
-                child: Icon(icon, color: primaryColor, size: 22),
+                child: const Icon(
+                  Icons.notifications_active_rounded,
+                  color: primaryColor,
+                  size: 18,
+                ),
               ),
-              const SizedBox(width: 12),
+              const SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  title,
+                  _formatNotificationTitle(notification, index),
                   style: const TextStyle(
-                    fontWeight: FontWeight.w700,
                     color: textPrimary,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 13,
                   ),
                 ),
               ),
-              if (index == 0)
-                const Icon(Icons.fiber_new_rounded, color: primaryColor, size: 20),
             ],
           ),
-          if (body != 'N/A') ...[
-            const SizedBox(height: 8),
-            Text(
-              body,
-              style: const TextStyle(
-                color: textPrimary,
-                height: 1.4,
-              ),
-            ),
-          ],
           const SizedBox(height: 8),
           Text(
-            meta,
+            _formatNotificationBody(notification),
             style: const TextStyle(
-              color: textSecondary,
+              color: Color(0xFF0EA5E9),
+              fontWeight: FontWeight.w600,
               fontSize: 12.5,
             ),
           ),
-        ],
-      ),
-    );
-  }
-
-  Widget _infoCard(String title, String value) {
-    return Container(
-      width: double.infinity,
-      margin: const EdgeInsets.only(bottom: 10),
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-      decoration: BoxDecoration(
-        color: cardColor,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: Colors.grey.shade200),
-      ),
-      child: Row(
-        children: [
-          Expanded(
-            child: Text(
-              title,
-              style: const TextStyle(
-                color: textSecondary,
-                fontSize: 14,
-              ),
-            ),
-          ),
-          Expanded(
-            child: Text(
-              value,
-              textAlign: TextAlign.right,
-              style: const TextStyle(
-                color: textPrimary,
-                fontSize: 15,
-                fontWeight: FontWeight.w600,
-              ),
+          const SizedBox(height: 6),
+          Text(
+            _formatNotificationMeta(notification),
+            style: const TextStyle(
+              color: textSecondary,
+              fontSize: 12,
             ),
           ),
         ],
