@@ -1,8 +1,11 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 
+import '../config/api_config.dart';
+import '../services/api_service.dart';
 import '../services/alert_service.dart';
 import '../services/auth_service.dart';
 import '../services/driver_socket_service.dart';
@@ -39,6 +42,8 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
 
   bool _isConnecting = true;
   bool _soundEnabled = true;
+  bool _isTripActive = false;
+
   String _connectionStatus = 'Connecting to live updates...';
   int _unreadCount = 0;
 
@@ -336,6 +341,56 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
     await _alertService.playPassengerAlert();
   }
 
+  Future<void> _toggleTripStatus() async {
+    final busId = _readValue(widget.bus, [
+      'regNo',
+      'registrationNumber',
+      'busNo',
+      'device_id',
+      'deviceId',
+    ]);
+    if (busId == 'N/A') {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Unable to determine bus identifier for trip status update.'),
+        ),
+      );
+      return;
+    }
+
+    final nextStatus = !_isTripActive;
+    final response = await ApiService().put(
+      ApiConfig.busTripStatus,
+      body: {
+        'busId': busId,
+        'isActive': nextStatus,
+      },
+      requiresAuth: true,
+    );
+
+    if (!mounted) return;
+
+    if (response.success) {
+      setState(() {
+        _isTripActive = nextStatus;
+      });
+
+      final message = nextStatus
+          ? 'Trip started successfully.'
+          : 'Trip ended successfully.';
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(message)),
+      );
+    } else {
+      final errorMessage = response.errorMessage ??
+          'Unable to update trip status. Please try again.';
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(errorMessage)),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final driverName = _readValue(widget.driver, ['name', 'fullName', 'driverName']);
@@ -344,9 +399,11 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
     final busId = _readValue(widget.bus, ['_id', 'id', 'busId']);
 
     final isDesktop = MediaQuery.of(context).size.width >= 980;
-    final isConnected = _connectionStatus.toLowerCase().contains('active') ||
-        _connectionStatus.toLowerCase().contains('connected') ||
-        _connectionStatus.toLowerCase().contains('joined');
+    final isConnected = !_isConnecting && (
+      _connectionStatus.toLowerCase().contains('active') ||
+      _connectionStatus.toLowerCase().contains('connected') ||
+      _connectionStatus.toLowerCase().contains('joined')
+    );
 
     return Scaffold(
       backgroundColor: backgroundColor,
@@ -663,6 +720,7 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
       ),
       child: Column(
         children: [
+          _tripToggleCard(),
           if (_activeNotification != null)
             _activeNotificationCard(_activeNotification!)
           else
@@ -695,7 +753,7 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
                     )
                   : ListView.separated(
                       itemCount: _notifications.length,
-                      separatorBuilder: (_, __) => const SizedBox(height: 8),
+                      separatorBuilder: (context, index) => const SizedBox(height: 8),
                       itemBuilder: (context, index) {
                         final notification = _notifications[index];
                         return _historyTile(notification, index);
@@ -720,7 +778,7 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
                 const Spacer(),
                 Switch(
                   value: _soundEnabled,
-                  activeColor: primaryColor,
+                  activeThumbColor: primaryColor,
                   onChanged: (value) {
                     setState(() {
                       _soundEnabled = value;
@@ -735,6 +793,57 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _tripToggleCard() {
+    final buttonLabel = _isTripActive ? 'End Trip' : 'Start Trip';
+    final buttonColor = _isTripActive ? Colors.red : Colors.green;
+    final buttonIcon = _isTripActive ? Icons.stop_circle_rounded : Icons.play_circle_rounded;
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
+      child: Container(
+        width: double.infinity,
+        decoration: BoxDecoration(
+          color: const Color(0xFFFFF8F4),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: const Color(0xFFFFE2D4)),
+        ),
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              'Trip Control',
+              style: TextStyle(
+                color: textPrimary,
+                fontWeight: FontWeight.w700,
+                fontSize: 14,
+              ),
+            ),
+            const SizedBox(height: 12),
+            SizedBox(
+              height: 56,
+              child: ElevatedButton.icon(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: buttonColor,
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                ),
+                onPressed: _toggleTripStatus,
+                icon: Icon(buttonIcon, size: 22),
+                label: Text(
+                  buttonLabel,
+                  style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w700),
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
