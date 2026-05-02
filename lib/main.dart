@@ -1,14 +1,19 @@
-import 'package:flutter/material.dart';
 import 'dart:async';
-import 'User/Home.dart';
-import 'User/DriverLogin.dart';
 
-void main() {
+import 'package:flutter/material.dart';
+
+import 'User/DriverLogin.dart';
+import 'User/Home.dart';
+
+Future<void> main() async {
+  // 1. This MUST be the first line
   WidgetsFlutterBinding.ensureInitialized();
+  
   FlutterError.onError = (FlutterErrorDetails details) {
     debugPrintStack(label: 'FLUTTER ERROR', stackTrace: details.stack);
     print('Exception: ${details.exception}');
   };
+  
   runZonedGuarded(
     () => runApp(const MyApp()),
     (Object error, StackTrace stack) {
