@@ -36,6 +36,8 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
   final List<Map<String, dynamic>> _notifications = [];
   final Completer<GoogleMapController> _mapController =
       Completer<GoogleMapController>();
+  final Map<String, String> _locationNameCache = {};
+  bool _ackInProgress = false;
 
   StreamSubscription<Map<String, dynamic>>? _notificationSubscription;
   StreamSubscription<String>? _statusSubscription;
@@ -220,16 +222,219 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
     };
 
     if (_passengerLocation != null) {
-      _polylines = {
-        Polyline(
-          polylineId: const PolylineId('boarding_path'),
-          color: primaryColor,
-          width: 4,
-          points: [_busLocation, _passengerLocation!],
-        ),
-      };
+      // If payload contains an encoded route/polyline, decode and display it.
+      final encoded = _findEncodedPolyline(payload);
+      if (encoded != null && encoded.isNotEmpty) {
+        final points = _decodePolyline(encoded);
+        if (points.isNotEmpty) {
+          _polylines = {
+            Polyline(
+              polylineId: const PolylineId('boarding_path'),
+              color: primaryColor,
+              width: 4,
+              points: points,
+            ),
+          };
+        } else {
+          _polylines = {
+            Polyline(
+              polylineId: const PolylineId('boarding_path'),
+              color: primaryColor,
+              width: 4,
+              points: [_busLocation, _passengerLocation!],
+            ),
+          };
+        }
+      } else {
+        _polylines = {
+          Polyline(
+            polylineId: const PolylineId('boarding_path'),
+            color: primaryColor,
+            width: 4,
+            points: [_busLocation, _passengerLocation!],
+          ),
+        };
+        // If we don't have an encoded route, try fetching a route from Directions API (if configured)
+        _fetchRouteFromDirectionsIfAvailable(_busLocation, _passengerLocation!);
+      }
+
+      // Kick off reverse geocode to obtain a readable location name for the passenger
+      final key = '${_passengerLocation!.latitude.toStringAsFixed(5)},${_passengerLocation!.longitude.toStringAsFixed(5)}';
+      if (!_locationNameCache.containsKey(key)) {
+        _reverseGeocode(_passengerLocation!).then((name) {
+          if (name != null && name.isNotEmpty) {
+            setState(() {
+              _locationNameCache[key] = name;
+            });
+          }
+        });
+      }
     } else {
       _polylines = {};
+    }
+  }
+
+  String? _findEncodedPolyline(Map<String, dynamic> payload) {
+    // Common keys that may contain encoded polylines
+    const candidates = [
+      'encodedPolyline',
+      'polyline',
+      'overview_polyline',
+      'routePolyline',
+      'encoded',
+      'path',
+    ];
+
+    for (final key in candidates) {
+      final v = payload[key];
+      if (v is String && v.length > 10) return v;
+      if (v is Map && v['points'] is String && (v['points'] as String).length > 10) {
+        return v['points'] as String;
+      }
+    }
+
+    // Also check nested objects like payload['route']
+    for (final entry in payload.entries) {
+      final v = entry.value;
+      if (v is Map) {
+        for (final key in candidates) {
+          final nested = v[key];
+          if (nested is String && nested.length > 10) return nested;
+          if (nested is Map && nested['points'] is String && (nested['points'] as String).length > 10) {
+            return nested['points'] as String;
+          }
+        }
+      }
+    }
+
+    return null;
+  }
+
+  Future<void> _fetchRouteFromDirectionsIfAvailable(LatLng origin, LatLng dest) async {
+    final key = ApiConfig.googleDirectionsKey;
+    if (key == null || key.isEmpty) return;
+
+    try {
+      final url = 'https://maps.googleapis.com/maps/api/directions/json?origin=${origin.latitude},${origin.longitude}&destination=${dest.latitude},${dest.longitude}&key=$key&mode=driving&alternatives=false';
+      final resp = await ApiService().get(url);
+      if (!resp.success || resp.data == null) return;
+      final routes = resp.data!['routes'];
+      if (routes is List && routes.isNotEmpty) {
+        final overview = routes[0]['overview_polyline'];
+        if (overview != null && overview['points'] is String) {
+          final decoded = _decodePolyline(overview['points'] as String);
+          if (decoded.isNotEmpty) {
+            setState(() => _polylines = {
+                  Polyline(
+                    polylineId: const PolylineId('boarding_path'),
+                    color: primaryColor,
+                    width: 4,
+                    points: decoded,
+                  ),
+                });
+        }
+      }
+    }
+    } catch (e) {
+      debugPrint('Directions fetch failed: $e');
+    }
+  }
+
+  List<LatLng> _decodePolyline(String encoded) {
+    final List<LatLng> points = [];
+    int index = 0;
+    int len = encoded.length;
+    int lat = 0;
+    int lng = 0;
+
+    while (index < len) {
+      int b;
+      int shift = 0;
+      int result = 0;
+      do {
+        b = encoded.codeUnitAt(index++) - 63;
+        result |= (b & 0x1F) << shift;
+        shift += 5;
+      } while (b >= 0x20);
+      int dlat = ((result & 1) != 0) ? ~(result >> 1) : (result >> 1);
+      lat += dlat;
+
+      shift = 0;
+      result = 0;
+      do {
+        b = encoded.codeUnitAt(index++) - 63;
+        result |= (b & 0x1F) << shift;
+        shift += 5;
+      } while (b >= 0x20);
+      int dlng = ((result & 1) != 0) ? ~(result >> 1) : (result >> 1);
+      lng += dlng;
+
+      final latitude = lat / 1E5;
+      final longitude = lng / 1E5;
+      points.add(LatLng(latitude, longitude));
+    }
+
+    return points;
+  }
+
+  Future<String?> _reverseGeocode(LatLng pos) async {
+    try {
+      final url = 'https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${pos.latitude}&lon=${pos.longitude}';
+      final resp = await ApiService().get(url);
+      if (resp.success && resp.data != null) {
+        final display = resp.data!['display_name'];
+        if (display != null && display.toString().trim().isNotEmpty) return display.toString();
+      }
+    } catch (_) {}
+    return '${pos.latitude.toStringAsFixed(5)}, ${pos.longitude.toStringAsFixed(5)}';
+  }
+
+  Future<void> _acknowledgeNotification(Map<String, dynamic> notification) async {
+    if (_ackInProgress) return;
+    setState(() => _ackInProgress = true);
+
+    // Try to find an identifier in the notification
+    final idCandidates = ['id', '_id', 'notificationId', 'notifId'];
+    String? notifId;
+    for (final k in idCandidates) {
+      final v = notification[k];
+      if (v != null) {
+        notifId = v.toString();
+        break;
+      }
+    }
+
+    final body = <String, dynamic>{
+      // include multiple likely fields so backend accepts the request
+      if (notifId != null) 'notificationId': notifId,
+      'status': 'acknowledged',
+      'action': 'driver_ack',
+    };
+
+    // include passenger id if available
+    final passengerId = notification['passenger'] is Map ? (notification['passenger']['_id'] ?? notification['passenger']['id']) : (notification['passengerId'] ?? notification['passenger_id']);
+    if (passengerId != null) body['passengerId'] = passengerId;
+
+    // also send bus id if available
+    final busId = _readValue(notification, ['busId', 'bus_id', 'busId', 'bus', '_id']);
+    if (busId != 'N/A') body['busId'] = busId;
+
+    final response = await ApiService().post(ApiConfig.notify, body: body, requiresAuth: true);
+
+    if (!mounted) return;
+    setState(() => _ackInProgress = false);
+
+    if (response.success) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Acknowledged')));
+      setState(() {
+        _activeNotification = null;
+        _unreadCount = 0;
+      });
+    } else {
+      // Log detailed response to help debug backend contract issues
+      debugPrint('Acknowledge failed: ${response.statusCode} ${response.errorMessage} ${response.data}');
+      final err = response.errorMessage ?? 'Failed to acknowledge';
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err)));
     }
   }
 
@@ -943,8 +1148,9 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
                   Icons.pin_drop_rounded,
                   'Passenger Location',
                   passengerLat != null && passengerLng != null
-                      ? '${passengerLat.toStringAsFixed(5)}, ${passengerLng.toStringAsFixed(5)}'
-                      : 'N/A',
+                    ? (_locationNameCache['${passengerLat.toStringAsFixed(5)},${passengerLng.toStringAsFixed(5)}'] ??
+                      '${passengerLat.toStringAsFixed(5)}, ${passengerLng.toStringAsFixed(5)}')
+                    : 'N/A',
                 ),
                 _detailLine(
                   Icons.directions_bus_filled_rounded,
@@ -962,8 +1168,8 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
                           backgroundColor: primaryColor,
                           foregroundColor: Colors.white,
                         ),
-                        onPressed: _markAllRead,
-                        child: const Text('Acknowledge'),
+                        onPressed: _ackInProgress ? null : () => _acknowledgeNotification(notification),
+                        child: _ackInProgress ? const SizedBox(height: 16, width: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)) : const Text('Acknowledge'),
                       ),
                     ),
                     const SizedBox(width: 8),

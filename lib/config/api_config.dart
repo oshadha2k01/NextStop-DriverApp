@@ -3,6 +3,9 @@ class ApiConfig {
   static const String socketUrl = 'https://smartbusstop.me';
  static const String socketPath = '/backend/socket.io';
   static const Duration requestTimeout = Duration(seconds: 15);
+  // Optional: Google Directions API key (set to non-empty to enable route fetching)
+  // Get a key from https://console.cloud.google.com/apis/credentials and enable Directions API
+  static const String googleDirectionsKey = 'AIzaSyBmgWCSt6zznmFD1XiuzKMW4gaxO5LANUc';
 //static const String baseUrl = 'http://192.168.8.118:5000/api';
  // static const String socketUrl = 'http://192.168.8.118:5000';
   //static const String socketPath = '/socket.io';
