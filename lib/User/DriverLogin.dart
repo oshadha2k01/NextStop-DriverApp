@@ -354,7 +354,7 @@ class _DriverLoginScreenState extends State<DriverLoginScreen> {
                 ),
                 const SizedBox(height: 18),
                 Text(
-                  'Use the same credentials issued by the transport office.',
+                  'Use the same credentials issued by the NextStop Super Admin Team.',
                   textAlign: TextAlign.center,
                   style: TextStyle(
                     color: textSecondary.withOpacity(0.95),

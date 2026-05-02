@@ -435,9 +435,9 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
                       padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
                       child: Column(
                         children: [
-                          Expanded(flex: 5, child: _mapDashboardCard(busRegNo, busRoute)),
+                          Expanded(flex: 8, child: _mapDashboardCard(busRegNo, busRoute)),
                           const SizedBox(height: 12),
-                          Expanded(flex: 6, child: _sidebarPanel()),
+                          Expanded(flex: 5, child: _sidebarPanel()),
                         ],
                       ),
                     ),
@@ -720,45 +720,54 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
       ),
       child: Column(
         children: [
-          _tripToggleCard(),
-          if (_activeNotification != null)
-            _activeNotificationCard(_activeNotification!)
-          else
-            Container(
-              width: double.infinity,
-              margin: const EdgeInsets.all(12),
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                color: const Color(0xFFFFF8F4),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: const Color(0xFFFFE2D4)),
-              ),
-              child: const Text(
-                'Waiting for passenger boarding notifications...',
-                style: TextStyle(
-                  color: textSecondary,
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
-            ),
           Expanded(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
-              child: _notifications.isEmpty
-                  ? const Center(
-                      child: Text(
+            child: SingleChildScrollView(
+              child: Column(
+                children: [
+                  _tripToggleCard(),
+                  if (_activeNotification != null)
+                    _activeNotificationCard(_activeNotification!)
+                  else
+                    Container(
+                      width: double.infinity,
+                      margin: const EdgeInsets.all(12),
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFFFF8F4),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: const Color(0xFFFFE2D4)),
+                      ),
+                      child: const Text(
+                        'Waiting for passenger boarding notifications...',
+                        style: TextStyle(
+                          color: textSecondary,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ),
+                  if (_notifications.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+                      child: Column(
+                        children: List.generate(
+                          _notifications.length,
+                          (index) => Padding(
+                            padding: const EdgeInsets.only(bottom: 8),
+                            child: _historyTile(_notifications[index], index),
+                          ),
+                        ),
+                      ),
+                    )
+                  else
+                    Padding(
+                      padding: const EdgeInsets.all(12),
+                      child: const Text(
                         'No notification history yet.',
                         style: TextStyle(color: textSecondary, fontSize: 13),
                       ),
-                    )
-                  : ListView.separated(
-                      itemCount: _notifications.length,
-                      separatorBuilder: (context, index) => const SizedBox(height: 8),
-                      itemBuilder: (context, index) {
-                        final notification = _notifications[index];
-                        return _historyTile(notification, index);
-                      },
                     ),
+                ],
+              ),
             ),
           ),
           Container(
