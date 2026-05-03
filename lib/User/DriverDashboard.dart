@@ -184,22 +184,36 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
     final busMap = _asMap(payload['bus']);
     final passengerMap = _asMap(payload['passenger']);
 
-    final busLat = _readDouble(payload, ['busLat', 'busLatitude']) ??
-        _readDouble(busMap, ['lat', 'latitude']);
-    final busLng = _readDouble(payload, ['busLng', 'busLongitude']) ??
-        _readDouble(busMap, ['lng', 'longitude']);
+    final busLocation = _extractLatLng(
+          payload,
+          latitudeKeys: const ['busLat', 'busLatitude', 'currentLat', 'currentLatitude', 'lat', 'latitude'],
+          longitudeKeys: const ['busLng', 'busLongitude', 'currentLng', 'currentLongitude', 'lng', 'longitude'],
+          nestedKeys: const ['bus', 'vehicle', 'busLocation', 'currentBus', 'location'],
+        ) ??
+        _extractLatLng(
+          busMap,
+          latitudeKeys: const ['lat', 'latitude'],
+          longitudeKeys: const ['lng', 'longitude'],
+        );
 
-    final passengerLat = _readDouble(payload, ['passengerLat', 'latitude']) ??
-        _readDouble(passengerMap, ['lat', 'latitude']);
-    final passengerLng = _readDouble(payload, ['passengerLng', 'longitude']) ??
-        _readDouble(passengerMap, ['lng', 'longitude']);
+    final passengerLocation = _extractLatLng(
+          payload,
+          latitudeKeys: const ['passengerLat', 'passengerLatitude', 'pickupLat', 'pickupLatitude', 'stopLat', 'stopLatitude', 'lat', 'latitude'],
+          longitudeKeys: const ['passengerLng', 'passengerLongitude', 'pickupLng', 'pickupLongitude', 'stopLng', 'stopLongitude', 'lng', 'longitude'],
+          nestedKeys: const ['passenger', 'passengerLocation', 'pickupLocation', 'boardingPoint', 'busStop', 'stop', 'location'],
+        ) ??
+        _extractLatLng(
+          passengerMap,
+          latitudeKeys: const ['lat', 'latitude'],
+          longitudeKeys: const ['lng', 'longitude'],
+        );
 
-    if (busLat != null && busLng != null) {
-      _busLocation = LatLng(busLat, busLng);
+    if (busLocation != null) {
+      _busLocation = busLocation;
     }
 
-    if (passengerLat != null && passengerLng != null) {
-      _passengerLocation = LatLng(passengerLat, passengerLng);
+    if (passengerLocation != null) {
+      _passengerLocation = passengerLocation;
     }
 
     _markers = {
@@ -217,7 +231,16 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
           markerId: const MarkerId('passenger'),
           position: _passengerLocation!,
           icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
-          infoWindow: const InfoWindow(title: 'Passenger boarding point'),
+          infoWindow: InfoWindow(
+            title: _readValue(
+              payload,
+              ['passengerLocationName', 'pickupLocationName', 'boardingPointName', 'stopName', 'busStopName'],
+            ),
+            snippet: _readValue(
+              payload,
+              ['message', 'text', 'description', 'details', 'boardingMessage'],
+            ),
+          ),
         ),
     };
 
@@ -272,6 +295,76 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
     } else {
       _polylines = {};
     }
+  }
+
+  LatLng? _extractLatLng(
+    Map<String, dynamic>? source, {
+    required List<String> latitudeKeys,
+    required List<String> longitudeKeys,
+    List<String> nestedKeys = const [],
+  }) {
+    if (source == null) return null;
+
+    final lat = _readDouble(source, latitudeKeys);
+    final lng = _readDouble(source, longitudeKeys);
+    if (lat != null && lng != null) {
+      return LatLng(lat, lng);
+    }
+
+    final coordinates = source['coordinates'];
+    if (coordinates is List && coordinates.length >= 2) {
+      final first = coordinates[0];
+      final second = coordinates[1];
+      final maybeLng = first is num ? first.toDouble() : double.tryParse(first.toString());
+      final maybeLat = second is num ? second.toDouble() : double.tryParse(second.toString());
+      if (maybeLat != null && maybeLng != null) {
+        return LatLng(maybeLat, maybeLng);
+      }
+    }
+
+    final location = _asMap(source['location']);
+    if (location != null) {
+      final nestedLat = _readDouble(location, latitudeKeys) ?? _readDouble(location, const ['lat', 'latitude']);
+      final nestedLng = _readDouble(location, longitudeKeys) ?? _readDouble(location, const ['lng', 'longitude']);
+      if (nestedLat != null && nestedLng != null) {
+        return LatLng(nestedLat, nestedLng);
+      }
+
+      final nestedCoordinates = location['coordinates'];
+      if (nestedCoordinates is List && nestedCoordinates.length >= 2) {
+        final first = nestedCoordinates[0];
+        final second = nestedCoordinates[1];
+        final maybeLng = first is num ? first.toDouble() : double.tryParse(first.toString());
+        final maybeLat = second is num ? second.toDouble() : double.tryParse(second.toString());
+        if (maybeLat != null && maybeLng != null) {
+          return LatLng(maybeLat, maybeLng);
+        }
+      }
+    }
+
+    for (final key in nestedKeys) {
+      final nested = _asMap(source[key]);
+      if (nested == null) continue;
+
+      final nestedLat = _readDouble(nested, latitudeKeys) ?? _readDouble(nested, const ['lat', 'latitude']);
+      final nestedLng = _readDouble(nested, longitudeKeys) ?? _readDouble(nested, const ['lng', 'longitude']);
+      if (nestedLat != null && nestedLng != null) {
+        return LatLng(nestedLat, nestedLng);
+      }
+
+      final nestedCoordinates = nested['coordinates'];
+      if (nestedCoordinates is List && nestedCoordinates.length >= 2) {
+        final first = nestedCoordinates[0];
+        final second = nestedCoordinates[1];
+        final maybeLng = first is num ? first.toDouble() : double.tryParse(first.toString());
+        final maybeLat = second is num ? second.toDouble() : double.tryParse(second.toString());
+        if (maybeLat != null && maybeLng != null) {
+          return LatLng(maybeLat, maybeLng);
+        }
+      }
+    }
+
+    return null;
   }
 
   String? _findEncodedPolyline(Map<String, dynamic> payload) {
@@ -1063,14 +1156,32 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
   }
 
   Widget _activeNotificationCard(Map<String, dynamic> notification) {
-    final passengerLat = _readDouble(notification, ['passengerLat', 'latitude']) ??
-        _readDouble(_asMap(notification['passenger']), ['lat', 'latitude']);
-    final passengerLng = _readDouble(notification, ['passengerLng', 'longitude']) ??
-        _readDouble(_asMap(notification['passenger']), ['lng', 'longitude']);
-    final busLat = _readDouble(notification, ['busLat', 'busLatitude']) ??
-        _readDouble(_asMap(notification['bus']), ['lat', 'latitude']);
-    final busLng = _readDouble(notification, ['busLng', 'busLongitude']) ??
-        _readDouble(_asMap(notification['bus']), ['lng', 'longitude']);
+    final passengerLocation = _extractLatLng(
+      notification,
+      latitudeKeys: const ['passengerLat', 'passengerLatitude', 'pickupLat', 'pickupLatitude', 'stopLat', 'stopLatitude', 'lat', 'latitude'],
+      longitudeKeys: const ['passengerLng', 'passengerLongitude', 'pickupLng', 'pickupLongitude', 'stopLng', 'stopLongitude', 'lng', 'longitude'],
+      nestedKeys: const ['passenger', 'passengerLocation', 'pickupLocation', 'boardingPoint', 'busStop', 'stop', 'location'],
+    );
+    final busLocation = _extractLatLng(
+      notification,
+      latitudeKeys: const ['busLat', 'busLatitude', 'currentLat', 'currentLatitude', 'lat', 'latitude'],
+      longitudeKeys: const ['busLng', 'busLongitude', 'currentLng', 'currentLongitude', 'lng', 'longitude'],
+      nestedKeys: const ['bus', 'vehicle', 'busLocation', 'currentBus', 'location'],
+    );
+    final passengerLocationName = _readValue(notification, [
+      'passengerLocationName',
+      'pickupLocationName',
+      'boardingPointName',
+      'stopName',
+      'busStopName',
+      'locationName',
+    ]);
+    final busLocationName = _readValue(notification, [
+      'busLocationName',
+      'busStopName',
+      'stopName',
+      'locationName',
+    ]);
 
     return Container(
       margin: const EdgeInsets.all(12),
@@ -1147,17 +1258,18 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
                 _detailLine(
                   Icons.pin_drop_rounded,
                   'Passenger Location',
-                  passengerLat != null && passengerLng != null
-                    ? (_locationNameCache['${passengerLat.toStringAsFixed(5)},${passengerLng.toStringAsFixed(5)}'] ??
-                      '${passengerLat.toStringAsFixed(5)}, ${passengerLng.toStringAsFixed(5)}')
-                    : 'N/A',
+                  passengerLocation != null
+                    ? (_locationNameCache['${passengerLocation.latitude.toStringAsFixed(5)},${passengerLocation.longitude.toStringAsFixed(5)}'] ??
+                      passengerLocationName
+                          .replaceFirst(RegExp(r'^N/A$'), '${passengerLocation.latitude.toStringAsFixed(5)}, ${passengerLocation.longitude.toStringAsFixed(5)}'))
+                    : passengerLocationName,
                 ),
                 _detailLine(
                   Icons.directions_bus_filled_rounded,
                   'Bus Location',
-                  busLat != null && busLng != null
-                      ? '${busLat.toStringAsFixed(5)}, ${busLng.toStringAsFixed(5)}'
-                      : 'N/A',
+                  busLocation != null
+                      ? '${busLocation.latitude.toStringAsFixed(5)}, ${busLocation.longitude.toStringAsFixed(5)}'
+                      : busLocationName,
                 ),
                 const SizedBox(height: 12),
                 Row(

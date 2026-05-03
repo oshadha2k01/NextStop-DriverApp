@@ -215,7 +215,7 @@ class _DriverLoginScreenState extends State<DriverLoginScreen> {
     return Scaffold(
       backgroundColor: backgroundColor,
       appBar: AppBar(
-        title: const Text('Driver Login'),
+        title: const Text(''),
         backgroundColor: backgroundColor,
         foregroundColor: textPrimary,
         elevation: 0,
