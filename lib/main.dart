@@ -3,7 +3,6 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import 'User/DriverLogin.dart';
-import 'User/Home.dart';
 
 Future<void> main() async {
   // 1. This MUST be the first line
@@ -42,50 +41,11 @@ class MyApp extends StatelessWidget {
       ),
       initialRoute: '/driver-login',
       routes: {
-        '/': (context) => const HomePage(),
+        '/': (context) => const DriverLoginScreen(),
         '/driver-login': (context) => const DriverLoginScreen(),
       },
     );
   }
 }
 
-class MyHomePage extends StatefulWidget {
-  const MyHomePage({super.key, required this.title});
 
-  final String title;
-
-  @override
-  State<MyHomePage> createState() => _MyHomePageState();
-}
-
-class _MyHomePageState extends State<MyHomePage> {
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
-        title: Text(widget.title),
-      ),
-      body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              Icons.directions_bus_rounded,
-              size: 100,
-              color: Color(0xFFFF6B35),
-            ),
-            const SizedBox(height: 20),
-            const Text(
-              'Welcome to NextStop!',
-              style: TextStyle(
-                fontSize: 24,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
