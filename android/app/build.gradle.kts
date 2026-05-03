@@ -8,10 +8,15 @@ plugins {
 }
 
 val envProps = Properties().apply {
-    val envFile = rootProject.file(".env")
-    if (envFile.exists()) {
-        envFile.inputStream().use { load(it) }
-    }
+    val candidateFiles = listOf(
+        rootProject.file(".env"),
+        rootProject.projectDir.parentFile?.resolve(".env"),
+    )
+    candidateFiles
+        .filterNotNull()
+        .firstOrNull { it.exists() }
+        ?.inputStream()
+        ?.use { load(it) }
 }
 
 val googleMapsApiKey =
