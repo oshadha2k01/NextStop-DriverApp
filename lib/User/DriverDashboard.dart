@@ -695,6 +695,7 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
     final busRegNo = _readValue(widget.bus, ['regNo', 'registrationNumber', 'busNo']);
     final busRoute = _readValue(widget.bus, ['route', 'routeName', 'routeNo']);
     final busId = _readValue(widget.bus, ['_id', 'id', 'busId']);
+    final showDashboardChrome = _activeNotification == null;
 
     final isDesktop = MediaQuery.of(context).size.width >= 980;
     final isConnected = !_isConnecting && (
@@ -708,8 +709,33 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
       body: SafeArea(
         child: Column(
           children: [
-            _topBar(driverName, isConnected),
-            _setupPanel(busRegNo, busRoute, busId),
+            AnimatedSwitcher(
+              duration: const Duration(milliseconds: 250),
+              switchInCurve: Curves.easeOut,
+              switchOutCurve: Curves.easeIn,
+              transitionBuilder: (child, animation) {
+                final offsetAnimation = Tween<Offset>(
+                  begin: const Offset(0, -0.08),
+                  end: Offset.zero,
+                ).animate(animation);
+                return FadeTransition(
+                  opacity: animation,
+                  child: SlideTransition(
+                    position: offsetAnimation,
+                    child: child,
+                  ),
+                );
+              },
+              child: showDashboardChrome
+                  ? Column(
+                      key: const ValueKey('dashboard_chrome_visible'),
+                      children: [
+                        _topBar(driverName, isConnected),
+                        _setupPanel(busRegNo, busRoute, busId),
+                      ],
+                    )
+                  : const SizedBox.shrink(key: ValueKey('dashboard_chrome_hidden')),
+            ),
             Expanded(
               child: isDesktop
                   ? Row(
